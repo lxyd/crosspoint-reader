@@ -268,6 +268,7 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
     }
 
     makePages();
+    brSplitFlushingPreviousBlock = false;
   }
   // If the pending anchor is a TOC chapter boundary, force a page break after the previous
   // block is flushed so the chapter starts on a fresh page.
@@ -882,6 +883,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
         // flush word preceding <br/> to currentTextBlock before calling startNewTextBlock
         self->flushPartWordBuffer();
       }
+      const bool inlineBreak = self->currentTextBlock && !self->currentTextBlock->isEmpty();
       // Tag the new block so startNewTextBlock can inject a full line-height gap if
       // the block remains empty (i.e. <br> is a section separator between paragraphs).
       // If the block gets text added before the next block opens it becomes non-empty,
@@ -889,6 +891,15 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
       BlockStyle brStyle =
           self->currentTextBlock ? self->currentTextBlock->getBlockStyle() : self->blockStyleStack.back();
       brStyle.fromBrElement = true;
+      if (inlineBreak) {
+        // Soft line break within one paragraph — poem lines, <p>foo<br/>bar</p>, etc.
+        brStyle.isBrLineContinuation = true;
+        brStyle.marginTop = 0;
+        brStyle.paddingTop = 0;
+        brStyle.marginBottom = 0;
+        brStyle.paddingBottom = 0;
+        self->brSplitFlushingPreviousBlock = true;
+      }
       self->startNewTextBlock(brStyle);
     } else {
       self->currentCssStyle = cssStyle;
@@ -1460,11 +1471,13 @@ void ChapterHtmlSlimParser::makePages() {
 
   // Apply top spacing before the paragraph (stored in pixels)
   const BlockStyle& blockStyle = currentTextBlock->getBlockStyle();
-  if (blockStyle.marginTop > 0) {
-    currentPageNextY += blockStyle.marginTop;
-  }
-  if (blockStyle.paddingTop > 0) {
-    currentPageNextY += blockStyle.paddingTop;
+  if (!blockStyle.isBrLineContinuation) {
+    if (blockStyle.marginTop > 0) {
+      currentPageNextY += blockStyle.marginTop;
+    }
+    if (blockStyle.paddingTop > 0) {
+      currentPageNextY += blockStyle.paddingTop;
+    }
   }
 
   // Calculate effective width accounting for horizontal margins/padding
@@ -1489,15 +1502,17 @@ void ChapterHtmlSlimParser::makePages() {
   }
 
   // Apply bottom spacing after the paragraph (stored in pixels)
-  if (blockStyle.marginBottom > 0) {
-    currentPageNextY += blockStyle.marginBottom;
-  }
-  if (blockStyle.paddingBottom > 0) {
-    currentPageNextY += blockStyle.paddingBottom;
-  }
+  if (!brSplitFlushingPreviousBlock) {
+    if (blockStyle.marginBottom > 0) {
+      currentPageNextY += blockStyle.marginBottom;
+    }
+    if (blockStyle.paddingBottom > 0) {
+      currentPageNextY += blockStyle.paddingBottom;
+    }
 
-  // Extra paragraph spacing if enabled (default behavior)
-  if (extraParagraphSpacing) {
-    currentPageNextY += lineHeight / 2;
+    // Extra paragraph spacing if enabled (default behavior)
+    if (extraParagraphSpacing) {
+      currentPageNextY += lineHeight / 2;
+    }
   }
 }

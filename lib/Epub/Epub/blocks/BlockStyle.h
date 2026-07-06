@@ -37,6 +37,11 @@ struct BlockStyle {
   // NOT propagated through getCombinedBlockStyle so it can't leak into sibling blocks.
   bool fromBrElement = false;
 
+  // Set when this block continues the same paragraph after an inline <br> (e.g. poem lines in
+  // one <p>). Suppresses first-line indent and paragraph spacing so lines align like soft
+  // breaks, not separate <p> blocks.
+  bool isBrLineContinuation = false;
+
   // Combined insets (margin + padding)
   [[nodiscard]] int16_t leftInset() const { return marginLeft + paddingLeft; }
   [[nodiscard]] int16_t rightInset() const { return marginRight + paddingRight; }
@@ -100,6 +105,7 @@ struct BlockStyle {
     // fromBrElement is consumed by startNewTextBlock when an empty <br> block
     // is merged with the following paragraph; never propagate it further.
     result.fromBrElement = false;
+    result.isBrLineContinuation = false;
     return result;
   }
 
