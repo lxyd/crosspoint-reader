@@ -97,12 +97,17 @@ class ChapterHtmlSlimParser {
   std::vector<std::pair<int, FootnoteEntry>> pendingFootnotes;  // <wordIndex, entry>
   int wordsExtractedInBlock = 0;
   bool brSplitFlushingPreviousBlock = false;  // suppress paragraph trailer spacing on <br> split
+  // True once the current block's top margin/padding has been applied. A paragraph longer than
+  // the flush threshold emits its first lines from characterData() before makePages() runs, so
+  // the top spacing must be applied there and not re-applied to the tail in makePages().
+  bool blockTopSpacingApplied = false;
 
   void updateEffectiveInlineStyle();
   void startNewTextBlock(const BlockStyle& blockStyle);
   void flushPendingAnchor();
   void recordArmedAnchors();
   void flushPartWordBuffer();
+  void applyBlockTopSpacing();
   void makePages();
   static EpdFontFamily::Style fontStyleForTextDecoration(CssTextDecoration decoration);
   static void applyDirectionToEntry(StyleStackEntry& entry, const CssStyle& css);

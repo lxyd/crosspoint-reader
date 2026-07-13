@@ -275,6 +275,7 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   flushPendingAnchor();
   currentTextBlock.reset(new ParsedText(extraParagraphSpacing, hyphenationEnabled, focusReadingEnabled, blockStyle));
   wordsExtractedInBlock = 0;
+  blockTopSpacingApplied = false;
 }
 
 void ChapterHtmlSlimParser::emitHorizontalRule(const BlockStyle& blockStyle) {
@@ -1178,6 +1179,10 @@ void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char
   // Spotted when reading Intermezzo, there are some really long text blocks in there.
   if (self->currentTextBlock->size() > 750) {
     LOG_DBG("EHP", "Text block too long, splitting into multiple pages");
+    // Apply the paragraph's leading spacing before its first lines are emitted here; otherwise
+    // makePages() would apply it later, in front of the tail, and the gap before the paragraph
+    // would be missing.
+    self->applyBlockTopSpacing();
     const int horizontalInset = self->currentTextBlock->getBlockStyle().totalHorizontalInset();
     const uint16_t effectiveWidth = (horizontalInset < self->viewportWidth)
                                         ? static_cast<uint16_t>(self->viewportWidth - horizontalInset)
@@ -1420,6 +1425,29 @@ bool ChapterHtmlSlimParser::parseAndBuildPages() {
   return true;
 }
 
+// Advance the write cursor by the current block's top margin/padding, exactly once per block.
+// Both makePages() and the mid-parse flush in characterData() call this so a long paragraph's
+// leading spacing lands before its first line rather than in front of its tail.
+void ChapterHtmlSlimParser::applyBlockTopSpacing() {
+  if (blockTopSpacingApplied || !currentTextBlock) {
+    return;
+  }
+  if (!currentPage) {
+    currentPage.reset(new Page());
+    currentPageNextY = 0;
+  }
+  const BlockStyle& blockStyle = currentTextBlock->getBlockStyle();
+  if (!blockStyle.isBrLineContinuation) {
+    if (blockStyle.marginTop > 0) {
+      currentPageNextY += blockStyle.marginTop;
+    }
+    if (blockStyle.paddingTop > 0) {
+      currentPageNextY += blockStyle.paddingTop;
+    }
+  }
+  blockTopSpacingApplied = true;
+}
+
 void ChapterHtmlSlimParser::addLineToPage(std::shared_ptr<TextBlock> line, const ExtractedLineMeta lineMeta) {
   const int lineHeight = renderer.getLineHeight(fontId) * lineCompression;
 
@@ -1469,18 +1497,13 @@ void ChapterHtmlSlimParser::makePages() {
 
   const int lineHeight = renderer.getLineHeight(fontId) * lineCompression;
 
-  // Apply top spacing before the paragraph (stored in pixels)
-  const BlockStyle& blockStyle = currentTextBlock->getBlockStyle();
-  if (!blockStyle.isBrLineContinuation) {
-    if (blockStyle.marginTop > 0) {
-      currentPageNextY += blockStyle.marginTop;
-    }
-    if (blockStyle.paddingTop > 0) {
-      currentPageNextY += blockStyle.paddingTop;
-    }
-  }
+  // Apply the paragraph's top spacing before its first line. For a paragraph that was
+  // partially flushed mid-parse (see the >750-word path in characterData), this already
+  // ran during that flush, so it is a no-op here and the margin is not re-applied to the tail.
+  applyBlockTopSpacing();
 
   // Calculate effective width accounting for horizontal margins/padding
+  const BlockStyle& blockStyle = currentTextBlock->getBlockStyle();
   const int horizontalInset = blockStyle.totalHorizontalInset();
   const uint16_t effectiveWidth =
       (horizontalInset < viewportWidth) ? static_cast<uint16_t>(viewportWidth - horizontalInset) : viewportWidth;
