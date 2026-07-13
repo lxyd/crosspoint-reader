@@ -32,6 +32,10 @@ class ParsedText {
   bool focusReadingEnabled;
   bool isNaturalAlign;
   bool hasRtlWord;
+  // True after the paragraph's real first line has been extracted. Mid-paragraph
+  // layout flushes (750-word threshold) must not re-apply first-line indent to the
+  // remaining words.
+  bool paragraphLeadingLineEmitted = false;
   std::vector<std::string> reorderedWordsScratch;
   std::vector<EpdFontFamily::Style> reorderedStylesScratch;
   std::vector<uint16_t> reorderedWidthsScratch;

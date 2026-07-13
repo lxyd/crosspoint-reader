@@ -572,12 +572,13 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
     return {};
   }
 
-  const int firstLineIndent = resolveFirstLineIndent(true, renderer, fontId);
+  const int firstLineIndent = resolveFirstLineIndent(!paragraphLeadingLineEmitted, renderer, fontId);
 
   // Ensure any word that would overflow even as the first entry on a line is split using fallback hyphenation.
   for (size_t i = 0; i < wordWidths.size(); ++i) {
     // First word needs to fit in reduced width if there's an indent
-    const int effectiveWidth = i == 0 ? pageWidth - firstLineIndent : pageWidth;
+    const int effectiveWidth =
+        (i == 0 && !paragraphLeadingLineEmitted) ? pageWidth - firstLineIndent : pageWidth;
     while (wordWidths[i] > effectiveWidth) {
       if (!hyphenateWordAtIndex(i, effectiveWidth, renderer, fontId, wordWidths, /*allowFallbackBreaks=*/true)) {
         break;
@@ -601,7 +602,8 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
     dp[i] = MAX_COST;
 
     // First line has reduced width due to text-indent
-    const int effectivePageWidth = i == 0 ? pageWidth - firstLineIndent : pageWidth;
+    const int effectivePageWidth =
+        (i == 0 && !paragraphLeadingLineEmitted) ? pageWidth - firstLineIndent : pageWidth;
 
     for (size_t j = i; j < totalWordCount; ++j) {
       // Add space before word j, unless it's the first word on the line or a continuation
@@ -685,11 +687,11 @@ std::vector<size_t> ParsedText::computeHyphenatedLineBreaks(const GfxRenderer& r
                                                             const int pageWidth, std::vector<uint16_t>& wordWidths,
                                                             std::vector<bool>& continuesVec,
                                                             std::vector<bool>& noSpaceBeforeVec) {
-  const int firstLineIndent = resolveFirstLineIndent(true, renderer, fontId);
+  const int firstLineIndent = resolveFirstLineIndent(!paragraphLeadingLineEmitted, renderer, fontId);
 
   std::vector<size_t> lineBreakIndices;
   size_t currentIndex = 0;
-  bool isFirstLine = true;
+  bool isFirstLine = !paragraphLeadingLineEmitted;
 
   while (currentIndex < wordWidths.size()) {
     const size_t lineStart = currentIndex;
@@ -862,7 +864,11 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
     }
   }
 
-  const int firstLineIndent = resolveFirstLineIndent(breakIndex == 0, renderer, fontId);
+  const bool isParagraphLeadingLine = breakIndex == 0 && !paragraphLeadingLineEmitted;
+  const int firstLineIndent = resolveFirstLineIndent(isParagraphLeadingLine, renderer, fontId);
+  if (isParagraphLeadingLine) {
+    paragraphLeadingLineEmitted = true;
+  }
 
   // Build line data by moving from the original vectors using index range
   std::vector<std::string> lineWords;
