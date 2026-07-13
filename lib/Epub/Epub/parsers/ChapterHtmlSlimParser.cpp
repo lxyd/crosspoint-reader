@@ -13,6 +13,7 @@
 #include <new>
 
 #include "Epub.h"
+#include "Epub/AnchorHash.h"
 #include "Epub/Page.h"
 #include "Epub/converters/ImageDecoderFactory.h"
 #include "Epub/converters/ImageToFramebufferDecoder.h"
@@ -185,7 +186,7 @@ void ChapterHtmlSlimParser::flushPendingAnchor() {
 
   // If the pending anchor is a TOC chapter boundary, force a page break after the previous
   // block is flushed so the chapter starts on a fresh page.
-  if (std::find(tocAnchors.begin(), tocAnchors.end(), pendingAnchorId) != tocAnchors.end()) {
+  if (pendingAnchorIsTocChapter) {
     if (currentPage && !currentPage->elements.empty()) {
       completePageFn(std::move(currentPage), xpathParagraphIndex, xpathListItemIndex);
       completedPageCount++;
@@ -199,6 +200,7 @@ void ChapterHtmlSlimParser::flushPendingAnchor() {
   // rather "arm" it to be fired in future when the anchored content is finally placed
   armedAnchorIds.push_back(std::move(pendingAnchorId));
   pendingAnchorId.clear();
+  pendingAnchorIsTocChapter = false;
 }
 
 // Stamp every armed anchor with the page whose content just landed. Called from each content
@@ -385,7 +387,10 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
             self->anchorData.push_back(
                 {std::move(self->pendingAnchorId), static_cast<uint16_t>(self->completedPageCount)});
           }
-          self->pendingAnchorId = idValue;
+          char anchorKey[FOOTNOTE_HREF_LEN];
+          AnchorHash::storageKey(anchorKey, sizeof(anchorKey), idValue);
+          self->pendingAnchorId = anchorKey;
+          self->pendingAnchorIsTocChapter = isTocAnchor;
         }
       } else if (strcmp(atts[i], "dir") == 0) {
         dirAttr = atts[i + 1];
@@ -822,8 +827,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
       }
       self->insideFootnoteLink = true;
       self->footnoteLinkDepth = self->depth;
-      strncpy(self->currentFootnote.href, href, sizeof(self->currentFootnote.href) - 1);
-      self->currentFootnote.href[sizeof(self->currentFootnote.href) - 1] = '\0';
+      AnchorHash::copyCompactHref(self->currentFootnote.href, sizeof(self->currentFootnote.href), href);
       self->currentFootnote.number[0] = '\0';
       self->currentFootnoteLinkTextLen = 0;
 

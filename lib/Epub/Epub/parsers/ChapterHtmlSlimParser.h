@@ -84,6 +84,7 @@ class ChapterHtmlSlimParser {
   int completedPageCount = 0;
   std::vector<std::pair<std::string, uint16_t>> anchorData;
   std::string pendingAnchorId;              // parsed id, not yet tied to a block boundary
+  bool pendingAnchorIsTocChapter = false;   // set when pendingAnchorId came from a TOC boundary id
   std::vector<std::string> armedAnchorIds;  // ids awaiting the real page their content lands on
   std::vector<std::string> tocAnchors;      // the list of anchors that are TOC chapter boundaries
   uint16_t xpathParagraphIndex = 0;

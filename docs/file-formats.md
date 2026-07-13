@@ -90,11 +90,16 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Version 30
+### Version 31
 
 Each file in `sections/*.bin` stores one laid-out spine section. The header is
 also the cache-busting key: if any layout-affecting setting differs from the
 current reader settings, the section is discarded and rebuilt.
+
+Version 31 stores long fragment identifiers (`id` attributes and `#anchor` href
+fragments longer than 43 characters) as `fnv:<16-hex>` keys using FNV-1a 64-bit.
+Footnote hrefs that would exceed `FOOTNOTE_HREF_LEN` (96) store the compact
+`path#fnv:<hex>` form instead of truncating.
 
 Version 30 fixes the paragraph top margin being dropped (or misplaced in front of
 the tail) for very long `<p>` blocks (>750 words) that are flushed mid-parse: the
@@ -122,7 +127,7 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define EXPECTED_VERSION 30
+#define EXPECTED_VERSION 31
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 96

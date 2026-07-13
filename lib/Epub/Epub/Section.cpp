@@ -4,6 +4,7 @@
 #include <Logging.h>
 #include <Serialization.h>
 
+#include "Epub/AnchorHash.h"
 #include "Epub/css/CssParser.h"
 #include "Page.h"
 #include "hyphenation/Hyphenator.h"
@@ -11,7 +12,7 @@
 
 namespace {
 // v28: text decoration bits now include line-through in serialized wordStyles.
-constexpr uint8_t SECTION_FILE_VERSION = 30;
+constexpr uint8_t SECTION_FILE_VERSION = 31;
 constexpr uint32_t HEADER_SIZE = sizeof(uint8_t) + sizeof(int) + sizeof(float) + sizeof(bool) + sizeof(uint8_t) +
                                  sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint16_t) + sizeof(bool) + sizeof(bool) +
                                  sizeof(uint8_t) + sizeof(bool) + sizeof(uint32_t) + sizeof(uint32_t) +
@@ -381,6 +382,10 @@ std::optional<uint16_t> Section::getPageForAnchor(const std::string& anchor) con
     return std::nullopt;
   }
 
+  char lookupKeyBuf[FOOTNOTE_HREF_LEN];
+  AnchorHash::storageKey(lookupKeyBuf, sizeof(lookupKeyBuf), anchor.c_str());
+  const std::string lookupKey(lookupKeyBuf);
+
   f.seek(anchorMapOffset);
   uint16_t count;
   serialization::readPod(f, count);
@@ -389,7 +394,7 @@ std::optional<uint16_t> Section::getPageForAnchor(const std::string& anchor) con
     uint16_t page;
     serialization::readString(f, key);
     serialization::readPod(f, page);
-    if (key == anchor) {
+    if (key == lookupKey) {
       return page;
     }
   }
