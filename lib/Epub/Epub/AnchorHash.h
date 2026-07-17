@@ -1,9 +1,9 @@
 #pragma once
 
-#include "FootnoteEntry.h"
-
 #include <cstdio>
 #include <cstring>
+
+#include "FootnoteEntry.h"
 
 // Compact keys for long EPUB fragment identifiers (#anchor / id attributes).
 // Uses FNV-1a 64-bit, matching ZipFile::fnvHash64 and BookMetadataCache::fnvHash64.
