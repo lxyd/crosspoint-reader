@@ -577,8 +577,7 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
   // Ensure any word that would overflow even as the first entry on a line is split using fallback hyphenation.
   for (size_t i = 0; i < wordWidths.size(); ++i) {
     // First word needs to fit in reduced width if there's an indent
-    const int effectiveWidth =
-        (i == 0 && !paragraphLeadingLineEmitted) ? pageWidth - firstLineIndent : pageWidth;
+    const int effectiveWidth = (i == 0 && !paragraphLeadingLineEmitted) ? pageWidth - firstLineIndent : pageWidth;
     while (wordWidths[i] > effectiveWidth) {
       if (!hyphenateWordAtIndex(i, effectiveWidth, renderer, fontId, wordWidths, /*allowFallbackBreaks=*/true)) {
         break;
@@ -602,8 +601,7 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
     dp[i] = MAX_COST;
 
     // First line has reduced width due to text-indent
-    const int effectivePageWidth =
-        (i == 0 && !paragraphLeadingLineEmitted) ? pageWidth - firstLineIndent : pageWidth;
+    const int effectivePageWidth = (i == 0 && !paragraphLeadingLineEmitted) ? pageWidth - firstLineIndent : pageWidth;
 
     for (size_t j = i; j < totalWordCount; ++j) {
       // Add space before word j, unless it's the first word on the line or a continuation
@@ -689,6 +687,20 @@ std::vector<size_t> ParsedText::computeHyphenatedLineBreaks(const GfxRenderer& r
                                                             std::vector<bool>& noSpaceBeforeVec) {
   const int firstLineIndent = resolveFirstLineIndent(!paragraphLeadingLineEmitted, renderer, fontId);
 
+  // Spacing inserted before words[wordIndex] when it follows words[wordIndex - 1] on the same line.
+  const auto spacingBefore = [&](const size_t wordIndex) -> int {
+    if (noSpaceBeforeVec[wordIndex]) {
+      return 0;
+    }
+    if (!continuesVec[wordIndex]) {
+      return renderer.getSpaceAdvance(fontId, lastCodepoint(words[wordIndex - 1]), firstCodepoint(words[wordIndex]),
+                                      wordStyles[wordIndex - 1]);
+    }
+    // Cross-boundary kerning for continuation tokens (e.g. nonbreaking spaces, attached punctuation)
+    return renderer.getKerning(fontId, lastCodepoint(words[wordIndex - 1]), firstCodepoint(words[wordIndex]),
+                               wordStyles[wordIndex - 1]);
+  };
+
   std::vector<size_t> lineBreakIndices;
   size_t currentIndex = 0;
   bool isFirstLine = !paragraphLeadingLineEmitted;
@@ -703,17 +715,7 @@ std::vector<size_t> ParsedText::computeHyphenatedLineBreaks(const GfxRenderer& r
     // Consume as many words as possible for current line, splitting when prefixes fit
     while (currentIndex < wordWidths.size()) {
       const bool isFirstWord = currentIndex == lineStart;
-      int spacing = 0;
-      if (!isFirstWord && noSpaceBeforeVec[currentIndex]) {
-        spacing = 0;
-      } else if (!isFirstWord && !continuesVec[currentIndex]) {
-        spacing = renderer.getSpaceAdvance(fontId, lastCodepoint(words[currentIndex - 1]),
-                                           firstCodepoint(words[currentIndex]), wordStyles[currentIndex - 1]);
-      } else if (!isFirstWord && continuesVec[currentIndex]) {
-        // Cross-boundary kerning for continuation words (e.g. nonbreaking spaces, attached punctuation)
-        spacing = renderer.getKerning(fontId, lastCodepoint(words[currentIndex - 1]),
-                                      firstCodepoint(words[currentIndex]), wordStyles[currentIndex - 1]);
-      }
+      const int spacing = isFirstWord ? 0 : spacingBefore(currentIndex);
       const int candidateWidth = spacing + wordWidths[currentIndex];
 
       // Word fits on current line
@@ -745,8 +747,27 @@ std::vector<size_t> ParsedText::computeHyphenatedLineBreaks(const GfxRenderer& r
 
     // Don't break before a continuation word (e.g., orphaned "?" after "question").
     // Backtrack to the start of the continuation group so the whole group moves to the next line.
+    const size_t indexBeforeBacktrack = currentIndex;
     while (currentIndex > lineStart + 1 && currentIndex < wordWidths.size() && continuesVec[currentIndex]) {
       --currentIndex;
+    }
+
+    // After rolling back a continues group (e.g. "word.&#xA0;–"), the group's head may still
+    // fit as a hyphenated prefix in the leftover space. Without this retry, a long word can sit
+    // alone on a line while the group head is pushed entirely to the next line because only the
+    // NBSP/dash tail overflowed — and hyphenation was never attempted (the head appeared to fit).
+    if (currentIndex < indexBeforeBacktrack && currentIndex > lineStart && currentIndex < wordWidths.size()) {
+      int usedWidth = 0;
+      for (size_t i = lineStart; i < currentIndex; ++i) {
+        usedWidth += (i == lineStart ? 0 : spacingBefore(i)) + wordWidths[i];
+      }
+      const int spacing = spacingBefore(currentIndex);
+      const int availableWidth = effectivePageWidth - usedWidth - spacing;
+      // Not the first word on the line, so do not use every-N-char fallback breaks.
+      if (availableWidth > 0 && hyphenateWordAtIndex(currentIndex, availableWidth, renderer, fontId, wordWidths,
+                                                     /*allowFallbackBreaks=*/false)) {
+        ++currentIndex;  // keep the hyphenated prefix on this line; remainder starts the next
+      }
     }
 
     lineBreakIndices.push_back(currentIndex);
