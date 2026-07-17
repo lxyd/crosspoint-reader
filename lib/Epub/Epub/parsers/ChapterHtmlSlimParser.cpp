@@ -66,6 +66,17 @@ const char* getAttribute(const XML_Char** atts, const char* attrName) {
 // Block-level, sectioning, and structural elements are always considered navigable.
 bool isNonNavigableInlineElement(const char* name) { return strcmp(name, "span") == 0; }
 
+// FictionBook EPUB converters wrap footnotes and chapter sections in shallow
+// <span id="..."> around block children (div.title1, etc.). Those ids are real link targets.
+// Progress-tracking converters nest <span id> inside paragraphs — ignore those (depth > 2).
+bool isNavigableSpanId(const char* name, const int elementDepth) {
+  return strcmp(name, "span") == 0 && elementDepth <= 2;
+}
+
+bool isNavigableIdElement(const char* name, const int elementDepth) {
+  return !isNonNavigableInlineElement(name) || isNavigableSpanId(name, elementDepth);
+}
+
 bool isInternalEpubLink(const char* href) {
   if (!href || href[0] == '\0') return false;
   if (strncmp(href, "http://", 7) == 0 || strncmp(href, "https://", 8) == 0) return false;
@@ -369,14 +380,16 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
         // Defer both anchor recording and TOC page breaks until startNewTextBlock,
         // after the previous block is flushed to pages via makePages().
         //
-        // Skip IDs on non-navigable inline elements (e.g. <span>): these are never
+        // Skip IDs on non-navigable inline elements (e.g. nested <span>): these are never
         // link targets in epub content, but reading-system converters can inject tens
-        // of thousands of them per chapter, exhausting the heap. TOC anchors are
-        // always recorded regardless of element type, since they drive page breaks.
+        // of thousands of them per chapter, exhausting the heap. Shallow <span id>
+        // wrappers around block content (FictionBook footnotes/chapters) are recorded.
+        // TOC anchors are always recorded regardless of element type, since they drive page breaks.
         const char* idValue = atts[i + 1];
         const bool isTocAnchor =
             std::find(self->tocAnchors.begin(), self->tocAnchors.end(), idValue) != self->tocAnchors.end();
-        if (isTocAnchor || (!isNonNavigableInlineElement(name) && self->anchorData.size() < MAX_ANCHORS_PER_CHAPTER)) {
+        if (isTocAnchor ||
+            (isNavigableIdElement(name, self->depth) && self->anchorData.size() < MAX_ANCHORS_PER_CHAPTER)) {
           // Flush a displaced anchor before overwriting. Consecutive non-block elements
           // (e.g. <aside id="fn1">text</aside><aside id="fn2">) with no intervening block
           // never trigger startNewTextBlock, so fn1 gets silently overwritten. That leaves
