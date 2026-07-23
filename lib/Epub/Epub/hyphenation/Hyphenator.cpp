@@ -56,13 +56,23 @@ size_t byteOffsetForIndex(const std::vector<CodepointInfo>& cps, const size_t in
   return (index < cps.size()) ? cps[index].byteOffset : (cps.empty() ? 0 : cps.back().byteOffset);
 }
 
+// True for characters that may sit on either side of a compound hyphen break.
+// Digits are included so forms like "99,9-процентным" / "COVID-19" can break at '-'.
+// Digit–digit ranges ("10-12") are excluded by the caller.
+bool isCompoundHyphenNeighbor(const uint32_t cp) { return isAlphabetic(cp) || isAsciiDigit(cp); }
+
 // Builds a vector of break information from explicit hyphen markers in the given codepoints.
-// Only hyphens that appear between two alphabetic characters are considered valid breaks.
+// Hyphens that join letter/digit compounds are valid breaks. Digit–digit ranges (e.g. "10-12")
+// are not treated as hyphenation opportunities.
 //
 // Example: "US-Satellitensystems" (cps: U, S, -, S, a, t, ...)
 //   -> finds '-' at index 2 with alphabetic neighbors 'S' and 'S'
 //   -> returns one BreakInfo at the byte offset of 'S' (the char after '-'),
 //      with requiresInsertedHyphen=false because '-' is already visible.
+//
+// Example: "99,9-процентным" (digit before '-', letter after)
+//   -> break after "99,9-" (no inserted hyphen), plus Liang breaks inside "процентным"
+//      once appendSegmentPatternBreaks runs on that branch.
 //
 // Example: "Satel\u00ADliten" (soft-hyphen between 'l' and 'l')
 //   -> returns one BreakInfo with requiresInsertedHyphen=true (soft-hyphen
@@ -72,7 +82,13 @@ std::vector<Hyphenator::BreakInfo> buildExplicitBreakInfos(const std::vector<Cod
 
   for (size_t i = 1; i + 1 < cps.size(); ++i) {
     const uint32_t cp = cps[i].value;
-    if (!isExplicitHyphen(cp) || !isAlphabetic(cps[i - 1].value) || !isAlphabetic(cps[i + 1].value)) {
+    const uint32_t left = cps[i - 1].value;
+    const uint32_t right = cps[i + 1].value;
+    if (!isExplicitHyphen(cp) || !isCompoundHyphenNeighbor(left) || !isCompoundHyphenNeighbor(right)) {
+      continue;
+    }
+    // Keep numeric ranges like "10-12" / "1990-1991" unsplittable at the dash.
+    if (isAsciiDigit(left) && isAsciiDigit(right)) {
       continue;
     }
     // Offset points to the next codepoint so rendering starts after the hyphen marker.
@@ -192,6 +208,8 @@ std::vector<Hyphenator::BreakInfo> Hyphenator::breakOffsets(const std::string& w
   }
 
   // Explicit hyphen markers (soft or hard) take precedence over language breaks.
+  // This includes digit–letter compounds ("99,9-процентным"); without recognizing those,
+  // Liang would see digits/commas/hyphens and refuse the whole token, leaving no breaks.
   auto explicitBreakInfos = buildExplicitBreakInfos(cps);
   if (!explicitBreakInfos.empty()) {
     // When a word contains explicit hyphens we also run Liang patterns on each alphabetic

@@ -18,11 +18,15 @@ class Hyphenator {
   // Returns byte offsets where the word may be hyphenated.
   //
   // Break sources (in priority order):
-  //   1. Explicit hyphens already present in the word (e.g. '-' or soft-hyphen U+00AD).
+  //   1. Explicit hyphens already present in the word (e.g. '-' or soft-hyphen U+00AD),
+  //      including letter/digit compounds ("99,9-процентным", "COVID-19"). Digit–digit
+  //      ranges ("10-12") are not break opportunities.
   //      When found, language patterns are additionally run on each alphabetic segment
   //      between separators so compound words can break within their parts.
   //      Example: "US-Satellitensystems" yields breaks after "US-" (no inserted hyphen)
   //               plus pattern breaks inside "Satellitensystems" (Sa|tel|li|ten|sys|tems).
+  //      Example: "99,9-процентным" yields a break after "99,9-" plus pattern breaks
+  //               inside "процентным" (e.g. 99,9-про|цент|ным).
   //   2. Apostrophe contractions between letters (e.g. all'improvviso).
   //      Liang patterns are run per alphabetic segment around apostrophes.
   //      A direct break at the apostrophe boundary is allowed only when the left
