@@ -33,9 +33,14 @@ class Hyphenator {
   //      segment has at least 3 letters and the right segment has at least 3 letters,
   //      avoiding short clitics (e.g. l', d') and contraction tails (e.g. 've, 're, 'll).
   //   3. Language-specific Liang patterns (e.g. German de_patterns).
+  //      Pure alphabetic words: one pass over the whole token.
   //      Example: "Quadratkilometer" -> Qua|drat|ki|lo|me|ter.
+  //      Mixed tokens with digits/punctuation but no hyphen (e.g. "9витеиташка",
+  //      "99,9процентным"): patterns run on each maximal alphabetic run so the
+  //      leading numbers stay attached to the first syllable ("9ви-|теиташка").
   //   4. Fallback every-N-chars splitting (only when includeFallback is true AND no
-  //      pattern breaks were found). Used as a last resort to prevent a single oversized
+  //      pattern breaks were found). For mixed tokens, fallback is limited to
+  //      alphabetic runs. Used as a last resort to prevent a single oversized
   //      word from overflowing the page width.
   static std::vector<BreakInfo> breakOffsets(const std::string& word, bool includeFallback);
 

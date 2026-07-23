@@ -171,6 +171,52 @@ void appendApostropheContractionBreaks(const std::vector<CodepointInfo>& cps,
   }
 }
 
+// Runs Liang (and optional every-N fallback) on each maximal alphabetic run.
+// Used for mixed tokens like "9витеиташка" / "99,9процентным" where a whole-word Liang
+// call rejects the token because of digits or other non-letters. Non-letter characters
+// stay glued to neighboring letters in the rendered prefix (e.g. "9ви-"), and are not
+// themselves treated as hyphenation points.
+void appendAlphabeticRunPatternBreaks(const std::vector<CodepointInfo>& cps, const LanguageHyphenator* hyphenator,
+                                      const bool includeFallback, std::vector<Hyphenator::BreakInfo>& outBreaks) {
+  const size_t minPrefix = hyphenator ? hyphenator->minPrefix() : LiangWordConfig::kDefaultMinPrefix;
+  const size_t minSuffix = hyphenator ? hyphenator->minSuffix() : LiangWordConfig::kDefaultMinSuffix;
+
+  size_t i = 0;
+  while (i < cps.size()) {
+    if (!isAlphabetic(cps[i].value)) {
+      ++i;
+      continue;
+    }
+
+    const size_t runStart = i;
+    while (i < cps.size() && isAlphabetic(cps[i].value)) {
+      ++i;
+    }
+
+    std::vector<CodepointInfo> segment(cps.begin() + static_cast<std::ptrdiff_t>(runStart),
+                                       cps.begin() + static_cast<std::ptrdiff_t>(i));
+    std::vector<size_t> segIndexes;
+    if (hyphenator) {
+      segIndexes = hyphenator->breakIndexes(segment);
+    }
+
+    if (includeFallback && segIndexes.empty()) {
+      for (size_t idx = minPrefix; idx + minSuffix <= segment.size(); ++idx) {
+        segIndexes.push_back(idx);
+      }
+    }
+
+    for (const size_t idx : segIndexes) {
+      assert(idx > 0 && idx < segment.size());
+      if (idx == 0 || idx >= segment.size()) continue;
+      const size_t cpIdx = runStart + idx;
+      if (cpIdx < cps.size()) {
+        outBreaks.push_back({cps[cpIdx].byteOffset, true});
+      }
+    }
+  }
+}
+
 void sortAndDedupeBreakInfos(std::vector<Hyphenator::BreakInfo>& infos) {
   std::sort(infos.begin(), infos.end(), [](const Hyphenator::BreakInfo& a, const Hyphenator::BreakInfo& b) {
     if (a.byteOffset != b.byteOffset) {
@@ -184,6 +230,23 @@ void sortAndDedupeBreakInfos(std::vector<Hyphenator::BreakInfo>& infos) {
                             return a.byteOffset == b.byteOffset;
                           }),
               infos.end());
+}
+
+std::vector<Hyphenator::BreakInfo> breaksFromCodepointIndexes(const std::vector<CodepointInfo>& cps,
+                                                              const std::vector<size_t>& indexes) {
+  std::vector<Hyphenator::BreakInfo> breaks;
+  breaks.reserve(indexes.size());
+  for (const size_t idx : indexes) {
+    // CJK characters can break without inserting a visible hyphen.
+    bool needsHyphen = true;
+    if (idx < cps.size() && utf8IsCjkBreakable(cps[idx].value)) {
+      needsHyphen = false;
+    } else if (idx > 0 && utf8IsCjkBreakable(cps[idx - 1].value)) {
+      needsHyphen = false;
+    }
+    breaks.push_back({byteOffsetForIndex(cps, idx), needsHyphen});
+  }
+  return breaks;
 }
 
 }  // namespace
@@ -253,13 +316,29 @@ std::vector<Hyphenator::BreakInfo> Hyphenator::breakOffsets(const std::string& w
     return segmentedBreaks;
   }
 
-  // Ask language hyphenator for legal break points.
+  bool allLetters = !cps.empty();
+  for (const auto& cp : cps) {
+    if (!isAlphabetic(cp.value)) {
+      allLetters = false;
+      break;
+    }
+  }
+
+  if (!allLetters) {
+    // Mixed letter/non-letter token (e.g. "9витеиташка", "99,9процентным"): whole-word Liang
+    // rejects non-letters, so hyphenate each alphabetic run on its own.
+    std::vector<BreakInfo> runBreaks;
+    appendAlphabeticRunPatternBreaks(cps, hyphenator, includeFallback, runBreaks);
+    sortAndDedupeBreakInfos(runBreaks);
+    return runBreaks;
+  }
+
+  // Pure alphabetic word: single Liang pass (and optional full-word fallback).
   std::vector<size_t> indexes;
   if (hyphenator) {
     indexes = hyphenator->breakIndexes(cps);
   }
 
-  // Only add fallback breaks if needed
   if (includeFallback && indexes.empty()) {
     const size_t minPrefix = hyphenator ? hyphenator->minPrefix() : LiangWordConfig::kDefaultMinPrefix;
     const size_t minSuffix = hyphenator ? hyphenator->minSuffix() : LiangWordConfig::kDefaultMinSuffix;
@@ -272,22 +351,7 @@ std::vector<Hyphenator::BreakInfo> Hyphenator::breakOffsets(const std::string& w
     return {};
   }
 
-  std::vector<Hyphenator::BreakInfo> breaks;
-  breaks.reserve(indexes.size());
-  for (const size_t idx : indexes) {
-    // CJK characters can break without inserting a visible hyphen.
-    // Check the codepoint at the break position: if it's a CJK character,
-    // no hyphen is needed since CJK scripts don't use hyphenation.
-    bool needsHyphen = true;
-    if (idx < cps.size() && utf8IsCjkBreakable(cps[idx].value)) {
-      needsHyphen = false;
-    } else if (idx > 0 && utf8IsCjkBreakable(cps[idx - 1].value)) {
-      needsHyphen = false;
-    }
-    breaks.push_back({byteOffsetForIndex(cps, idx), needsHyphen});
-  }
-
-  return breaks;
+  return breaksFromCodepointIndexes(cps, indexes);
 }
 
 void Hyphenator::setPreferredLanguage(const std::string& lang) { cachedHyphenator_ = hyphenatorForLanguage(lang); }
